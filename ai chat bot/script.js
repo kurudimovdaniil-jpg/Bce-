@@ -1,8 +1,13 @@
 ﻿const chatMessages = document.getElementById("chatMessages");
 const chatForm = document.getElementById("chatForm");
 const userInput = document.getElementById("userInput");
+const useApi = document.getElementById("useApi");
+const apiStatus = document.getElementById("apiStatus");
+const chatStatus = document.getElementById("chatStatus");
 
 const botName = "Проект-Бот";
+const history = [];
+const historyLimit = 8;
 
 const replies = [
   {
@@ -47,6 +52,7 @@ function addMessage(text, sender) {
   message.textContent = text;
   chatMessages.appendChild(message);
   chatMessages.scrollTop = chatMessages.scrollHeight;
+  requestAnimationFrame(() => message.classList.add("appear"));
 }
 
 function findReply(message) {
@@ -65,24 +71,71 @@ function findReply(message) {
 function botReply(userMessage) {
   const response = findReply(userMessage);
   addMessage(response, "bot");
+  history.push({ role: "assistant", content: response });
 }
 
 function initGreeting() {
   addMessage(
-    `Здравствуйте! Я ${botName}. Напишите сообщение, и я отвечу локально без API.`,
+    `Здравствуйте! Я ${botName}. Локальный режим работает сразу, а OpenAI можно подключить отдельно.`,
     "bot"
   );
 }
 
-chatForm.addEventListener("submit", (event) => {
+function updateModeStatus() {
+  if (useApi.checked) {
+    chatStatus.textContent = "Онлайн • пробуем OpenAI";
+  } else {
+    chatStatus.textContent = "Онлайн • отвечает локально";
+  }
+}
+
+async function getApiReply(userMessage) {
+  const payload = {
+    message: userMessage,
+    history: history.slice(-historyLimit),
+  };
+
+  const response = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    const reason = errorData.error || "Ошибка API";
+    throw new Error(reason);
+  }
+
+  const data = await response.json();
+  return data.reply || "Извините, я не получил ответ от API.";
+}
+
+chatForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const text = userInput.value.trim();
   if (!text) return;
 
   addMessage(text, "user");
+  history.push({ role: "user", content: text });
   userInput.value = "";
 
-  setTimeout(() => botReply(text), 400);
+  if (useApi.checked) {
+    try {
+      const reply = await getApiReply(text);
+      addMessage(reply, "bot");
+      history.push({ role: "assistant", content: reply });
+      apiStatus.textContent = "API: подключено";
+    } catch (error) {
+      apiStatus.textContent = "API: ошибка";
+      addMessage("OpenAI недоступен. Переключаюсь на локальный режим.", "bot");
+      setTimeout(() => botReply(text), 200);
+    }
+  } else {
+    setTimeout(() => botReply(text), 400);
+  }
 });
 
 initGreeting();
+updateModeStatus();
+useApi.addEventListener("change", updateModeStatus);
